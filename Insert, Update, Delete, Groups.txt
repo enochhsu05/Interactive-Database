@@ -1,0 +1,222 @@
+package ca.ubc.cs304.database;
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.PreparedStatement;
+import java.sql.Statement;
+import java.io.BufferedReader;
+import java.io.FileReader;
+
+
+import ca.ubc.cs304.util.PrintablePreparedStatement;
+
+/**
+ * This class handles all database related transactions
+ */
+public class DatabaseConnectionHandler {
+
+	private static final String DATABASE_URL = "jdbc:sqlite:anime_database.db";
+
+	public static void main(String[] args) {
+		try {
+		//	String sqlFilePath = "CPSC304_Java_Project-master/src/initial population.sql";
+		//	executeSqlFromFile(connection, sqlFilePath);
+			connection = connectToDatabase();
+			nestedGroupStudioByNumberOfAnime();
+			// printAnime();
+			connection.close();
+		} catch (Exception e) {
+			System.out.println(e.getMessage());
+		}
+	}
+
+	private static void printAnime() {
+		String query = "SELECT * FROM Anime";
+		try (PreparedStatement sqlStatement = connection.prepareStatement(query);
+			 ResultSet rs = sqlStatement.executeQuery()) {
+			while (rs.next()) {
+				System.out.println(rs.getString(1));
+//				System.out.println(rs.getString(2));
+//				System.out.println(rs.getString(3));
+//				System.out.println(rs.getString(4));
+//				System.out.println(rs.getString(5));
+//				System.out.println(rs.getString(6));
+			}
+		} catch (Exception e) {
+			System.out.println("Error: " + e.getMessage());
+		}
+	}
+
+	private static Connection connectToDatabase() {
+		Connection connection = null;
+		try {
+			connection = DriverManager.getConnection(DATABASE_URL);
+			System.out.println("Connection to SQLite has been established.");
+		} catch (Exception e) {
+			System.out.println(e.getMessage());
+		}
+		return connection;
+	}
+
+	private static void executeSqlFromFile(Connection conn, String filePath) {
+		try (BufferedReader br = new BufferedReader(new FileReader(filePath));
+			 Statement stmt = conn.createStatement()) {
+			String line;
+			StringBuilder sql = new StringBuilder();
+			while ((line = br.readLine()) != null) {
+				sql.append(line).append("\n");
+				if (line.trim().endsWith(";")) {
+					stmt.execute(sql.toString());
+					sql.setLength(0);
+				}
+			}
+		} catch (Exception e) {
+			System.out.println("Error executing SQL file: " + e.getMessage());
+		}
+	}
+
+
+	private static final String EXCEPTION_TAG = "[EXCEPTION]";
+	private static final String WARNING_TAG = "[WARNING]";
+
+	private static Connection connection = null;
+
+
+	public void close() {
+		try {
+			if (connection != null) {
+				connection.close();
+			}
+		} catch (SQLException e) {
+			System.out.println(EXCEPTION_TAG + " " + e.getMessage());
+		}
+	}
+
+
+	private static void rollbackConnection() {
+		try  {
+			connection.rollback();
+		} catch (SQLException e) {
+			System.out.println(EXCEPTION_TAG + " " + e.getMessage());
+		}
+	}
+
+
+	public static void insertAnime(String name, int author_id, String studio, String genre, int year_aired, String status) {
+		try {
+			String query = "INSERT INTO Anime VALUES (?,?,?,?,?,?)";
+			PrintablePreparedStatement s = new PrintablePreparedStatement(connection.prepareStatement(query), query, false);
+			s.setString(1, name);
+			s.setInt(2, author_id);
+			s.setString(3, studio);
+			s.setString(4, genre);
+			s.setInt(5, year_aired);
+			s.setString(6, status);
+
+			s.executeUpdate();
+			connection.commit();
+
+			s.close();
+		} catch (SQLException e) {
+			System.out.println(EXCEPTION_TAG + " " + e.getMessage());
+			rollbackConnection();
+		}
+	}
+
+	public static void updateAnime(String name, int author_id, String studio, String genre, int year_aired, String status) {
+		try {
+			String query = "UPDATE anime SET author_id = ?, studio = ?, genre = ?, year_aired = ?, status = ? " +
+					"WHERE name = ?";
+			PrintablePreparedStatement s = new PrintablePreparedStatement(connection.prepareStatement(query), query, false);
+			s.setInt(1, author_id);
+			s.setString(2, studio);
+			s.setString(3, genre);
+			s.setInt(4, year_aired);
+			s.setString(5, status);
+			s.setString(6, name);
+
+			int rowCount = s.executeUpdate();
+			if (rowCount == 0) {
+				System.out.println("Anime " + name + " does not exist");
+			}
+
+			connection.commit();
+
+			s.close();
+		} catch (SQLException e) {
+			System.out.println(EXCEPTION_TAG + " " + e.getMessage());
+			rollbackConnection();
+		}
+	}
+
+	public static void deleteAnime(String anime_name) {
+		try {
+			String query = "DELETE FROM Anime WHERE name = ?";
+			PrintablePreparedStatement s = new PrintablePreparedStatement(connection.prepareStatement(query), query, false);
+			s.setString(1, anime_name);
+
+			int rowCount = s.executeUpdate();
+			if (rowCount == 0) {
+				System.out.println("Anime " + anime_name + " does not exist");
+			}
+
+			connection.commit();
+
+			s.close();
+		} catch (SQLException e) {
+			System.out.println(EXCEPTION_TAG + " " + e.getMessage());
+			rollbackConnection();
+		}
+	}
+
+	// Display how many anime of each genre is in the database. 
+	public static void groupByGenreCountAnime() {
+		try {
+			String query = "SELECT genre, COUNT(name) FROM Anime GROUP BY genre";
+			PrintablePreparedStatement s = new PrintablePreparedStatement(connection.prepareStatement(query), query, false);
+
+			try (ResultSet rs = s.executeQuery()) {
+				while (rs.next()) {
+					System.out.println(rs.getString(1));
+					System.out.println(rs.getString(2));
+				}
+			} catch (Exception e) {
+				System.out.println("Error: " + e.getMessage());
+			}
+			connection.commit();
+
+			s.close();
+		} catch (SQLException e) {
+			System.out.println(EXCEPTION_TAG + " " + e.getMessage());
+			rollbackConnection();
+		}
+
+	}
+
+	// Display how many anime studios made in the last 4 years (counting from the most recent anime in the database).
+	public static void nestedGroupByStudioCountAnime() {
+		try {
+			String query = "SELECT studio, COUNT(name) FROM Anime WHERE year_aired > (SELECT MAX(year_aired) - 5 " +
+					"FROM Anime) GROUP BY studio";
+			PrintablePreparedStatement s = new PrintablePreparedStatement(connection.prepareStatement(query), query, false);
+
+			try (ResultSet rs = s.executeQuery()) {
+				while (rs.next()) {
+					System.out.println(rs.getString(1));
+					System.out.println(rs.getString(2));
+				}
+			} catch (Exception e) {
+				System.out.println("Error: " + e.getMessage());
+			}
+
+			connection.commit();
+
+			s.close();
+		} catch (SQLException e) {
+			System.out.println(EXCEPTION_TAG + " " + e.getMessage());
+			rollbackConnection();
+		}
+	}
+}
